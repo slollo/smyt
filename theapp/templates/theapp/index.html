@@ -1,0 +1,235 @@
+
+{% extends "base.html" %}
+
+{% load i18n %}
+{% load static %}
+{% load theapptools %}
+
+{% block title %}{% trans "The main page" %}{% endblock %}
+
+{% block css %}
+<style>
+	label.error
+	{
+		color: red;
+		font-style: italic;
+	}
+
+	input
+	{
+		border: 1px solid black;
+	}
+
+	input.error
+	{
+		border: 1px solid red;
+	}
+</style>
+{% endblock %}
+
+{% block javascript %}
+<script type="text/javascript" src="http://ajax.aspnetcdn.com/ajax/jquery.validate/1.13.0/jquery.validate.min.js"></script>
+<script type="text/javascript" src="{% get_static_prefix %}jquery-form/jquery.form.min.js"></script>
+<script type="text/javascript">
+	$(function () {
+		var models = {{ models|json|safe }};
+		var inputs = {
+			"CharField": '<input type="text">',
+			"DateField": '<input type="date" name="bday">',
+			"IntegerField": '<input type="number" name="bday">'
+		};
+
+
+		function construct_field(model_id, field_num, value, id)
+		{
+			var field_info = models[model_id].fields[field_num];
+			var input_html = "";
+			var val = $('<div>' + value + "</div>");
+
+			if (field_info.type in inputs) {
+				val.addClass("fieldvalue");
+
+				var input = $(inputs[field_info.type]);
+				input.attr("name", field_info.id);
+				input.attr("value", value);
+				input.attr("required", true);
+				input.attr("id", model_id + id + field_info.id);
+				input.addClass("submitonchange");
+				if (field_info.type == "CharField") {
+					input.attr("maxlength", field_info.max_length);
+				}
+
+				var input_model = $('<input type="hidden" name="model-name">');
+				input_model.attr("value", model_id);
+
+				var input_field = $('<input type="hidden" name="field-name">');
+				input_field.attr("value", field_info.id);
+
+				var input_id = $('<input type="hidden" name="id">');
+				input_id.attr("value", id);
+
+				var form = $('<form method="POST" action="{% url "theapp-set_field" %}" />');
+				form.append("{% csrf_token %}");
+				form.append(input);
+				form.append(input_model);
+				form.append(input_field);
+				form.append(input_id);
+				form.hide();
+
+				input_html = $("<div />").append(form).html();
+			}
+
+			return $("<div />").append(val).html() + input_html;
+		}
+
+
+		function construct_add_form(model_id)
+		{
+			var fieldset = $("<fieldset />");
+			fieldset.append('<legend>{% trans "New" %} ' +
+					models[model_id]["name"].toLowerCase() + '</legend>');
+			fields = models[model_id]["fields"];
+			for (var field in fields) {
+				if (fields[field].id == "id") continue;
+
+				var input = $(inputs[fields[field].type]);
+				input.attr("name", fields[field].id);
+				input.attr("required", true);
+				input.attr("id", model_id + fields[field].id);
+
+				fieldset.append("<label>" + fields[field].name + "</label>");
+				fieldset.append("&nbsp;");
+				fieldset.append(input);
+				fieldset.append("<br />");
+			}
+
+			var input_model = $('<input type="hidden" name="model-name">');
+			input_model.attr("value", model_id);
+			fieldset.append(input_model);
+
+			var form = $('<form method="POST" action="{% url "theapp-create_object" %}">');
+			form.addClass("createform");
+			form.append("{% csrf_token %}");
+			form.append(fieldset);
+			//form.append('<button>{% trans "Submit" %}</button>');
+			form.append('<input class="submit" type="submit">');
+
+			return $("<div />").append(form).html();
+		}
+
+
+		function set_content(model_id, data)
+		{
+			var table = $("<table border='1'/>");
+
+			var tr = $("<tr />")
+			fields = models[model_id]["fields"];
+			for (var field in fields) {
+				tr.append("<th>" + fields[field].name + "</th>");
+			}
+			table.append(tr);
+
+			for (var d in data) {
+				tr = $("<tr />")
+				for (var field in fields) {
+					tr.append('<td>' +
+							construct_field(
+								model_id,
+								field,
+								data[d][fields[field].id],
+								data[d].id)
+							+ "</td>");
+				}
+				table.append(tr);
+			}
+
+			$("#modelscontent").html("");
+			$("#modelscontent").append(table);
+			$("#modelscontent").append("<br />");
+			$("#modelscontent").append(construct_add_form(model_id));
+			$("#modelscontent .fieldvalue").click(function () {
+				$(this).hide();
+				$(this).next().show();
+			});
+			$("#modelscontent form").each(function () {$(this).validate();});
+			$("#modelscontent form").ajaxForm({
+				beforeSubmit: function (arr, form, options) {
+					$("#loader").show();
+				},
+				success: function (data, statusText, xhr, form) {
+					if (data != "") alert(data);
+					else if (form.hasClass("createform")) {
+						get_content($("input[name='model-name']").val());
+					}
+
+					$("#loader").hide();
+				},
+				error: function (error_obj, status_text, error_text) {
+					alert(status_text + ": " + error_text);
+					$("#loader").hide();
+				}
+			});
+			$("#modelscontent form input.submitonchange").change(function () {
+				$(this).parent().submit();
+			});
+			$("#modelscontent input[type=date]").datepicker({
+					dateFormat: "yy-mm-dd"});
+		}
+
+
+		function get_content(model_id) {
+			$("#loader").show();
+			$.ajax({
+				url: "{% url 'theapp-get_content' %}",
+				data: {name: model_id},
+				timeout: 5000,
+				dataType: "json"
+			}).done(function (data) {
+				set_content(model_id, data);
+			}).always(function () {
+				$("#loader").hide();
+			}).fail(function(jqXHR, textStatus, errorThrown) {
+				alert(textStatus + ": " + errorThrown);
+			});
+		};
+
+
+		$("#modelsmenu li a").click(function () {
+			get_content($(this).attr("href"));
+
+			$("#modelsmenu li a").each(function () {
+				$(this).html($(this).attr("name"));
+			});
+			$(this).html("<b>" + $(this).attr("name") + "</b>");
+
+			return false;
+		});
+	});
+</script>
+{% endblock %}
+
+{% block content %}
+<table>
+	<tr>
+		<td valign="top" width="300px">
+
+			<ul id="modelsmenu">
+			{% for model_id, data in models.items %}
+				<li>
+					<a href="{{ model_id }}" name="{{ data.name_plural }}">
+					{{ data.name_plural }}</a>
+				</li>
+			{% endfor %}
+			</ul>
+			<img src="{% get_static_prefix %}theapp/loader.gif" id="loader" hidden="hidden">
+
+		</td>
+
+		<td valign="top" id="modelscontent">
+			{% trans "No model selected" %}
+		</td>
+	</tr>
+</table>
+
+{% endblock %}
+

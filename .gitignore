@@ -1,0 +1,4 @@
+*.mo
+*.pyc
+.*.swp
+db.sqlite3
